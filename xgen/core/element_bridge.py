@@ -1,0 +1,200 @@
+"""
+Element Bridge.
+Maps a clicked native UIAElement to its corresponding UINode in the cached Appium XML tree.
+Implements the 4-step matching and live UIA fallback strategy.
+"""
+
+from __future__ import annotations
+
+from collections import deque
+import logging
+from typing import List, NamedTuple, Optional
+
+from xgen.core.session_manager import SessionManager
+from xgen.core.tree_cache import WindowTreeCache
+from xgen.core.tree_parser import TreeParser, UINode
+from xgen.core.uia_bridge import UIAElement
+from xgen.utils.rect import Rect
+
+logger = logging.getLogger("xgen.bridge")
+
+
+class BridgeResult(NamedTuple):
+    node: Optional[UINode]
+    method: str          # "runtime_id" | "bounding_rect" | "point_containment" | "appium_refind" | "uia_fallback" | "not_found"
+    confidence: float    # 0.0 - 1.0 numerical confidence
+    competing_candidates: int = 0  # Number of overlapping/plausible candidate nodes
+    is_live_fallback: bool = False
+
+
+class ElementBridge:
+    """
+    Bridges native OS UIA click events to cached XML nodes.
+    """
+
+    def find_node(
+        self,
+        uia_element: UIAElement,
+        cache: Optional[WindowTreeCache],
+        session: Optional[SessionManager] = None,
+        click_x: int = 0,
+        click_y: int = 0,
+    ) -> BridgeResult:
+        """
+        Locate matching UINode in cached XML tree.
+        Step 1: Match by exact RuntimeId.
+        Step 2: Match by exact BoundingRectangle + ControlType.
+        Step 3: Point containment search (innermost leaf containing click point).
+        Step 4: Appium driver re-find fallback.
+        Step 5: Live UIA synthetic fallback if element is missing from cached XML.
+        """
+        if not uia_element:
+            return BridgeResult(node=None, method="not_found", confidence=0.0)
+
+        if cache and cache.parsed_root:
+            root = cache.parsed_root
+
+            # Step 1: RuntimeId match (highest confidence)
+            if uia_element.runtime_id:
+                node = self._match_by_runtime_id(uia_element.runtime_id, root)
+                if node is not None:
+                    node.bridge_confidence = 1.0
+                    logger.debug("Bridge: Matched by RuntimeId %s (conf: 1.0)", uia_element.runtime_id)
+                    return BridgeResult(node=node, method="runtime_id", confidence=1.0, competing_candidates=0)
+
+            # Step 2: Exact BoundingRectangle + ControlType match
+            if uia_element.bounding_rect:
+                overlapping = self.get_overlapping_nodes(uia_element.bounding_rect, cache)
+                competing_count = max(0, len(overlapping) - 1)
+                node = self._match_by_bounding_rect(
+                    rect=uia_element.bounding_rect,
+                    tag=uia_element.control_type,
+                    name=uia_element.name,
+                    root=root
+                )
+                if node is not None:
+                    conf = max(0.4, 0.90 - (0.05 * competing_count))
+                    node.bridge_confidence = conf
+                    logger.debug("Bridge: Matched by exact BoundingRectangle %s (conf: %.2f)", uia_element.bounding_rect, conf)
+                    return BridgeResult(node=node, method="bounding_rect", confidence=conf, competing_candidates=competing_count)
+
+            # Step 3: Fuzzy Point-containment hit test (matches deepest leaf at click point)
+            px = click_x
+            py = click_y
+            if px <= 0 and py <= 0 and uia_element.bounding_rect:
+                r = uia_element.bounding_rect
+                px = r.left + r.width // 2
+                py = r.top + r.height // 2
+
+            if px > 0 and py > 0:
+                node = TreeParser.find_deepest_at_point(root, px, py, tag=uia_element.control_type)
+                if node is not None:
+                    siblings = len(node.parent.children) if node.parent else 1
+                    conf = max(0.4, 0.70 - (0.05 * max(0, siblings - 1)))
+                    node.bridge_confidence = conf
+                    logger.debug("Bridge: Matched by point containment at (%d, %d) (conf: %.2f)", px, py, conf)
+                    return BridgeResult(node=node, method="point_containment", confidence=conf, competing_candidates=max(0, siblings - 1))
+
+            # Step 4: Appium Driver re-find fallback
+            if session and session.session_info:
+                eid = self._match_by_appium_refind(uia_element, session)
+                if eid:
+                    rt_id = session.get_element_attribute(eid, "RuntimeId")
+                    if rt_id:
+                        node = self._match_by_runtime_id(rt_id, root)
+                        if node is not None:
+                            node.bridge_confidence = 0.60
+                            logger.debug("Bridge: Matched via Appium re-find (%s) (conf: 0.60)", eid)
+                            return BridgeResult(node=node, method="appium_refind", confidence=0.60, competing_candidates=0)
+
+        # Step 5: Virtualized / Missing from XML snapshot -> Live UIA fallback
+        logger.info("Bridge: Element not found in XML snapshot. Using Live UIA fallback (conf: 0.40).")
+        synthetic_node = self._create_synthetic_uinode(uia_element)
+        synthetic_node.bridge_confidence = 0.40
+        return BridgeResult(
+            node=synthetic_node,
+            method="uia_fallback",
+            confidence=0.40,
+            competing_candidates=0,
+            is_live_fallback=True
+        )
+
+    def get_overlapping_nodes(self, rect: Rect, cache: WindowTreeCache) -> List[UINode]:
+        """Return all nodes whose bounding rectangle intersects or matches rect."""
+        if not cache or not cache.parsed_root or not rect:
+            return []
+        return self._build_disambiguation_list(rect, cache.parsed_root)
+
+    # --- Private Helpers ---
+
+    def _match_by_runtime_id(self, rt_id: str, root: UINode) -> Optional[UINode]:
+        return TreeParser.find_by_runtime_id(root, rt_id)
+
+    def _match_by_bounding_rect(
+        self, rect: Rect, tag: str, name: str, root: UINode
+    ) -> Optional[UINode]:
+        candidates = TreeParser.find_by_bounding_rect(root, rect, tag)
+        if not candidates:
+            # Try without tag filter if control type names differ slightly
+            candidates = TreeParser.find_by_bounding_rect(root, rect, "")
+
+        if not candidates:
+            return None
+
+        if len(candidates) == 1:
+            return candidates[0]
+
+        # Disambiguate: Exact Name match
+        if name:
+            for c in candidates:
+                if c.name == name:
+                    return c
+
+        # Disambiguate: Smallest area (innermost child)
+        candidates.sort(key=lambda n: n.bounding_rect.area if n.bounding_rect else 99999999)
+        return candidates[0]
+
+    def _match_by_appium_refind(self, uia_el: UIAElement, session: SessionManager) -> Optional[str]:
+        # Construct temporary single-attribute XPath
+        temp_xpath = ""
+        if uia_el.automation_id and not uia_el.automation_id.isdigit():
+            temp_xpath = f"//*[@AutomationId='{uia_el.automation_id}']"
+        elif uia_el.name:
+            temp_xpath = f"//{uia_el.control_type}[@Name='{uia_el.name}']"
+
+        if temp_xpath:
+            return session.find_element_by_xpath(temp_xpath)
+        return None
+
+    def _build_disambiguation_list(self, rect: Rect, root: UINode) -> List[UINode]:
+        matches: List[UINode] = []
+        queue = deque([root])
+        while queue:
+            node = queue.popleft()
+            if node.bounding_rect and node.bounding_rect.intersects(rect):
+                matches.append(node)
+            queue.extend(node.children)
+        return matches
+
+    def _create_synthetic_uinode(self, el: UIAElement) -> UINode:
+        """Create a detached UINode directly from native UIAElement properties."""
+        attrs = {
+            "ControlType": el.control_type,
+            "AutomationId": el.automation_id,
+            "Name": el.name,
+            "ClassName": el.class_name,
+            "IsEnabled": str(el.is_enabled),
+            "RuntimeId": el.runtime_id,
+            "HelpText": el.help_text,
+            "AriaProperties": el.aria_properties,
+        }
+        if el.bounding_rect:
+            attrs["BoundingRectangle"] = f"[{el.bounding_rect.left},{el.bounding_rect.top}][{el.bounding_rect.right},{el.bounding_rect.bottom}]"
+
+        return UINode(
+            tag=el.control_type,
+            attributes=attrs,
+            bounding_rect=el.bounding_rect,
+            runtime_id=el.runtime_id,
+            is_transient=True
+        )

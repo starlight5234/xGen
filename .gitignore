@@ -1,0 +1,59 @@
+# ==========================================
+# Python & Environment
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+*.env
+
+# ==========================================
+# PyInstaller & Packaging Outputs
+# ==========================================
+build/
+dist/
+*.spec.bak
+*.egg-info/
+*.egg
+*.zip
+*.sha256
+
+# ==========================================
+# Testing & Code Quality
+# ==========================================
+.pytest_cache/
+.pytest_scratch/
+.test_scratch/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ==========================================
+# Application Logs & Temporary Files
+# ==========================================
+logs/
+*.log
+.write_test
+scratch/
+
+# ==========================================
+# IDE & System Files
+# ==========================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# ==========================================
+# Markdown Files (Ignore all .md except README)
+# ==========================================
+*.md
+!README.md
+!readme.md
+!README*.md

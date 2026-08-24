@@ -1,0 +1,131 @@
+name: Build, Preview & Release xGen
+
+on:
+  # Manual trigger from GitHub Actions UI or GitHub CLI
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build Type'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - release
+      release_tag:
+        description: 'Custom Release Tag (e.g. v1.0.0, only used for release build type)'
+        required: false
+        default: ''
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Package Windows App
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Build & Test Dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install .[dev]
+
+      - name: Run Test Suite
+        run: |
+          python -m pytest tests -v --color=yes
+
+      - name: Determine Build Metadata & Names
+        id: meta
+        shell: pwsh
+        run: |
+          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+          $isTag = $env:GITHUB_REF -like "refs/tags/v*"
+          $manualRelease = ("${{ github.event.inputs.build_type }}" -eq "release")
+          
+          if ($isTag) {
+            $tag = $env:GITHUB_REF_NAME
+            $isRelease = $true
+          } elseif ($manualRelease -and "${{ github.event.inputs.release_tag }}" -ne "") {
+            $tag = "${{ github.event.inputs.release_tag }}"
+            $isRelease = $true
+          } else {
+            $tag = "preview-$shortSha"
+            $isRelease = $false
+          }
+
+          $zipName = "xGen-$tag-windows-x64.zip"
+          
+          echo "TAG_NAME=$tag" >> $env:GITHUB_ENV
+          echo "IS_RELEASE=$isRelease" >> $env:GITHUB_ENV
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+          echo "SHORT_SHA=$shortSha" >> $env:GITHUB_ENV
+          
+          Write-Host "Build Target: $tag"
+          Write-Host "Is Official Release: $isRelease"
+          Write-Host "Zip Archive Name: $zipName"
+
+      - name: Build Standalone Windows Executable (.exe)
+        run: |
+          python build_exe.py
+
+      - name: Package Distribution Zip & Generate Checksums
+        shell: pwsh
+        run: |
+          $distFolder = "dist/xGen"
+          if (-not (Test-Path $distFolder)) {
+            Write-Error "dist/xGen folder not found!"
+            exit 1
+          }
+
+          # Create standardized zip archive
+          $zipPath = "dist/$env:ZIP_NAME"
+          Compress-Archive -Path "$distFolder/*" -DestinationPath $zipPath -CompressionLevel Optimal
+          
+          # Generate SHA256 checksum
+          $hash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
+          "$hash  $env:ZIP_NAME" | Out-File -FilePath "$zipPath.sha256" -Encoding utf8
+          
+          Write-Host "Created Archive: $zipPath"
+          Write-Host "SHA256 Checksum: $hash"
+
+      - name: Upload Workflow Artifact (Preview & CI Build)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: |
+            dist/${{ env.ZIP_NAME }}
+            dist/${{ env.ZIP_NAME }}.sha256
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: env.IS_RELEASE == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "xGen ${{ env.TAG_NAME }}"
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          generate_release_notes: true
+          files: |
+            dist/${{ env.ZIP_NAME }}
+            dist/${{ env.ZIP_NAME }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

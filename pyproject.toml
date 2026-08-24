@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xgen-inspector"
+version = "1.0.0"
+description = "Production-grade Windows XPath Inspector & Element Locator Studio for Appium and WinAppDriver"
+readme = "README.md"
+authors = [
+    { name = "xGen Automation Team" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["appium", "winappdriver", "xpath", "windows-automation", "uiautomation", "testing"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "PyQt6>=6.6.0",
+    "requests>=2.31.0",
+    "lxml>=5.1.0",
+    "uiautomation>=2.0.18",
+    "pynput>=1.7.6",
+    "pywin32>=306",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "responses>=0.25.0",
+    "pyinstaller>=6.3.0",
+]
+
+[project.scripts]
+xgen = "xgen.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xgen*"]
