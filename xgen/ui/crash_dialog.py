@@ -33,11 +33,11 @@ class CrashDialog(QDialog):
         self.resize(650, 420)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self.setStyleSheet(
-            "QDialog { background: #181a1f; color: #d0d7de; }"
-            "QLabel { color: #e0e0e0; }"
-            "QTextEdit { background: #121417; color: #ff8a80; border: 1px solid #3c4048; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 11px; padding: 6px; }"
-            "QPushButton { background: #2b303c; color: #ffffff; border: 1px solid #3c4454; border-radius: 4px; padding: 6px 14px; font-weight: bold; font-size: 11px; }"
-            "QPushButton:hover { background: #383f4f; }"
+            "QDialog { background: #0f1115; color: #f1f5f9; font-family: 'Segoe UI', system-ui, sans-serif; }"
+            "QLabel { color: #cbd5e1; }"
+            "QTextEdit { background: #12151b; color: #f87171; border: 1px solid #2a3140; border-radius: 6px; font-family: 'Consolas', monospace; font-size: 11px; padding: 8px; }"
+            "QPushButton { background: #1e2430; color: #f1f5f9; border: 1px solid #2e384d; border-radius: 6px; padding: 6px 16px; font-weight: 600; font-size: 11px; }"
+            "QPushButton:hover { background: #2b3548; border-color: #3b82f6; }"
         )
 
         formatted_tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))

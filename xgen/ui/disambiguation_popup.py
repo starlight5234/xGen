@@ -18,9 +18,9 @@ class DisambiguationPopup(QMenu):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setStyleSheet(
-            "QMenu { background: #1e2024; color: #d0d7de; border: 1px solid #3c4048; padding: 4px; }"
-            "QMenu::item { padding: 6px 14px; font-size: 11px; }"
-            "QMenu::item:selected { background: #1976d2; color: #ffffff; }"
+            "QMenu { background: #14171e; color: #cbd5e1; border: 1px solid #232834; border-radius: 6px; padding: 4px; font-family: 'Segoe UI', system-ui, sans-serif; }"
+            "QMenu::item { padding: 6px 16px; font-size: 11px; border-radius: 4px; }"
+            "QMenu::item:selected { background: #2563eb; color: #ffffff; }"
         )
 
     def show_for_nodes(self, nodes: List[UINode], pos: QPoint) -> None:

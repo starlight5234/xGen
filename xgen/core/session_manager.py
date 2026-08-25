@@ -63,7 +63,7 @@ class SessionWorker(QObject):
             info = self.mgr._create_session(config)
             self.connect_success.emit(info)
         except Exception as e:
-            logger.exception("Session creation failed: %s", e)
+            logger.error("Session creation failed: %s", e)
             self.connect_failed.emit(str(e))
 
     @pyqtSlot()
@@ -72,8 +72,11 @@ class SessionWorker(QObject):
             xml = self.mgr._fetch_source_internal()
             self.source_ready.emit(xml)
         except Exception as e:
-            logger.exception("Failed to fetch source: %s", e)
-            self.source_failed.emit(str(e))
+            if not self.mgr.session_id or "terminated" in str(e).lower():
+                logger.info("Source fetch aborted: session disconnected.")
+            else:
+                logger.error("Failed to fetch source: %s", e)
+                self.source_failed.emit(str(e))
 
     @pyqtSlot(str)
     def do_switch_window(self, handle: str) -> None:
@@ -81,7 +84,7 @@ class SessionWorker(QObject):
             self.mgr._switch_window_internal(handle)
             self.window_switched.emit(handle)
         except Exception as e:
-            logger.exception("Failed to switch window: %s", e)
+            logger.error("Failed to switch window: %s", e)
             self.window_switch_failed.emit(str(e))
 
     @pyqtSlot()
@@ -176,6 +179,12 @@ class SessionManager(QObject):
 
     def connect(self, config: XGenConfig) -> None:
         """Asynchronously connect to or start an Appium session."""
+        if self.state == SessionState.CONNECTING:
+            logger.warning("Already connecting to session, ignoring duplicate request.")
+            return
+        if self.state == SessionState.CONNECTED:
+            logger.warning("Already connected to session, ignoring connect request.")
+            return
         self.current_config = config
         self._base_url = config.appium_url.rstrip("/")
         self._set_state(SessionState.CONNECTING)
@@ -378,6 +387,8 @@ class SessionManager(QObject):
         # Retry with backoff on transient WinAppDriver Desktop Root COM timeouts (HTTP 500)
         max_attempts = 3
         for attempt in range(max_attempts):
+            if not self._session_id:
+                raise RuntimeError("Session disconnected.")
             try:
                 r = self._http_session.get(url, timeout=float(timeout_seconds))
                 if r.status_code == 200:
@@ -393,9 +404,13 @@ class SessionManager(QObject):
                     logger.warning("WinAppDriver GET /source returned 500 (attempt %d/%d). Retrying in %.1fs...", attempt + 1, max_attempts, delay)
                     time.sleep(delay)
                     continue
+                elif r.status_code == 404 and ("invalid session" in r.text.lower() or "terminated" in r.text.lower()):
+                    raise RuntimeError("Session terminated or closed.")
                 else:
                     raise RuntimeError(f"Failed to fetch source: HTTP {r.status_code} ({r.text[:200]})")
             except requests.exceptions.RequestException as e:
+                if not self._session_id:
+                    raise RuntimeError("Session disconnected.")
                 if attempt < max_attempts - 1:
                     delay = 0.8 * (attempt + 1)
                     logger.warning("GET /source network exception: %s. Retrying in %.1fs...", e, delay)

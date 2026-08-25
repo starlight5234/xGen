@@ -102,20 +102,31 @@ class AttributePanel(QWidget):
             "QTableWidget::item:hover { background: #1e2430; }"
             "QTableWidget::item:selected { background: #1e3a8a; color: #93c5fd; font-weight: 600; }"
         )
+        self.setMinimumHeight(32)
+        self.setMaximumHeight(380)  # Capped so attributes cannot crush XPath candidate panel
         layout.addWidget(self.table)
 
-    def toggle_collapse(self) -> None:
-        """Toggle attribute table visibility between expanded and collapsed."""
-        self._is_collapsed = not self._is_collapsed
+    @property
+    def is_collapsed(self) -> bool:
+        return self._is_collapsed
+
+    def set_collapsed(self, collapsed: bool, emit_signal: bool = True) -> None:
+        """Set attribute table visibility directly to collapsed or expanded."""
+        if self._is_collapsed == collapsed:
+            return
+        self._is_collapsed = collapsed
         self.table.setVisible(not self._is_collapsed)
         self.btn_toggle.setText("▶" if self._is_collapsed else "▼")
         if self._is_collapsed:
-            self.setMaximumHeight(32)
             self.lbl_title.setText(f"{self._title_text} [Collapsed]")
         else:
-            self.setMaximumHeight(16777215)
             self.lbl_title.setText(self._title_text)
-        self.collapsed_toggled.emit(self._is_collapsed)
+        if emit_signal:
+            self.collapsed_toggled.emit(self._is_collapsed)
+
+    def toggle_collapse(self) -> None:
+        """Toggle attribute table visibility between expanded and collapsed."""
+        self.set_collapsed(not self._is_collapsed, emit_signal=True)
 
     def populate(self, node: Optional[UINode]) -> None:
         """Populate attributes table from UINode."""

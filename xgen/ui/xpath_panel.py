@@ -405,13 +405,23 @@ class XPathPanel(QWidget):
 
         # 1. Header with Container Prefix Toggle
         header_row = QHBoxLayout()
+        header_row.setContentsMargins(2, 2, 2, 2)
+        header_row.setSpacing(6)
+
         self.lbl_header = QLabel("XPath Selectors")
         self.lbl_header.setStyleSheet("color: #f1f5f9; font-weight: 600; font-size: 11px; padding: 2px 4px;")
         header_row.addWidget(self.lbl_header)
         header_row.addStretch()
 
-        self.chk_prefix = QCheckBox("Include //Window Prefix")
-        self.chk_prefix.setStyleSheet("QCheckBox { color: #94a3b8; font-size: 11px; } QCheckBox::indicator { width: 13px; height: 13px; }")
+        self.chk_prefix = QCheckBox("//Window Prefix")
+        self.chk_prefix.setToolTip("Include top-level //Window container prefix in generated XPaths (e.g. //Window[@Name='...']//Button)")
+        self.chk_prefix.setStyleSheet(
+            "QCheckBox { color: #94a3b8; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 4px; background: #14171e; border: 1px solid #232834; }"
+            "QCheckBox:hover { color: #f1f5f9; border-color: #3b82f6; }"
+            "QCheckBox:checked { color: #60a5fa; border-color: #2563eb; background: #131b2e; }"
+            "QCheckBox::indicator { width: 13px; height: 13px; border-radius: 3px; border: 1px solid #334155; background: #181c24; }"
+            "QCheckBox::indicator:checked { background: #2563eb; border-color: #3b82f6; }"
+        )
         self.chk_prefix.toggled.connect(self._on_prefix_toggled)
         header_row.addWidget(self.chk_prefix)
         main_layout.addLayout(header_row)
@@ -448,9 +458,10 @@ class XPathPanel(QWidget):
         self._clear_cards()
 
         if not node:
-            self.lbl_header.setText("XPath Selectors [No Element Selected]")
-            lbl_empty = QLabel("Hover or click an element in Inspect Mode (F3) to generate unique XPaths.")
-            lbl_empty.setStyleSheet("color: #757575; font-size: 11px; padding: 20px; font-style: italic;")
+            self.lbl_header.setText("XPath Selectors")
+            lbl_empty = QLabel("🎯 Click or hover any element in Inspect Mode (F3) or select a node in the Tree Panel to generate and test unique XPaths.")
+            lbl_empty.setWordWrap(True)
+            lbl_empty.setStyleSheet("color: #64748b; font-size: 11px; padding: 24px 16px; background: #15181f; border: 1px dashed #222733; border-radius: 8px; line-height: 1.4;")
             self.card_layout.insertWidget(0, lbl_empty)
             return
 

@@ -15,11 +15,19 @@ init_dpi_awareness()
 from xgen.config import ConfigManager
 from xgen.ui.crash_dialog import install_global_excepthook
 from xgen.ui.main_window import MainWindow
+from xgen.ui.theme import apply_dark_theme
 from xgen.utils.logger import setup_logging
 
 # Setup rotating log and install crash boundary
 log_file = setup_logging(logging.INFO)
 install_global_excepthook()
+
+# Set Windows explicit AppUserModelID so taskbar displays the custom icon
+try:
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("xgen.xpath.inspector.v1")
+except Exception:
+    pass
 
 logger = logging.getLogger("xgen.main")
 
@@ -29,6 +37,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("xGen")
     app.setOrganizationName("xGen Automation")
+    apply_dark_theme(app)
 
     # Load configuration
     config = ConfigManager.load()

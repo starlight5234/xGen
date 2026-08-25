@@ -8,7 +8,7 @@ a = Analysis(
     ['xgen/main.py'],
     pathex=[str(root_dir)],
     binaries=[],
-    datas=[],
+    datas=[('xgen_app_icon.svg', '.'), ('xgen/resources/*', 'xgen/resources')],
     hiddenimports=[
         'xgen',
         'xgen.capture',

@@ -32,6 +32,7 @@ class XGenConfig:
     implicit_wait_ms: int = 0
     auto_detect_new_windows: bool = True
     auto_connect_on_startup: bool = True
+    confirm_disconnect: bool = True
 
     tree_stale_warning_seconds: int = 60
     source_fetch_timeout_seconds: int = 60

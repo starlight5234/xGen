@@ -33,10 +33,10 @@ def qapp():
 
 def test_toolbar_state_changes(qapp):
     toolbar = Toolbar()
-    assert "Disconnected" in toolbar.btn_session.text()
+    assert "Disconnected" in toolbar.btn_status_dot.toolTip()
 
     toolbar.set_session_state("connected", "Notepad.exe")
-    assert "Notepad.exe" in toolbar.btn_session.text()
+    assert "Connected to: Notepad.exe" in toolbar.btn_status_dot.toolTip()
 
 
 def test_tree_panel_and_attribute_panel_population(qapp):
@@ -184,3 +184,17 @@ def test_xpath_card_test_and_click_signals(qapp):
     assert type_signals[0][0] == card.candidate.xpath
     assert type_signals[0][1] == "Hello World"
     assert type_signals[0][2] == card
+
+
+def test_session_dialog_confirm_disconnect_setting(qapp):
+    from xgen.ui.session_dialog import SessionDialog
+    from xgen.core.session_manager import SessionManager
+
+    sm = SessionManager()
+    cfg = XGenConfig(confirm_disconnect=True)
+    dlg = SessionDialog(cfg, sm)
+    assert dlg.chk_confirm_disconnect.isChecked() is True
+
+    dlg.chk_confirm_disconnect.setChecked(False)
+    assert dlg.config.confirm_disconnect is False
+    dlg.close()

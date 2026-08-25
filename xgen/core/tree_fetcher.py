@@ -80,8 +80,11 @@ class TreeFetchWorker(QObject):
 
             self.finished.emit(window_handle, raw_xml, parsed_root)
         except Exception as e:
-            logger.exception("Full tree fetch failed: %s", e)
-            self.failed.emit(str(e))
+            if self._is_cancelled or not self.session_manager.session_id or "invalid session" in str(e).lower() or "terminated" in str(e).lower():
+                logger.info("Tree fetch cancelled (session disconnected or terminated).")
+            else:
+                logger.error("Full tree fetch failed: %s", e)
+                self.failed.emit(str(e))
 
     def cancel(self) -> None:
         self._is_cancelled = True

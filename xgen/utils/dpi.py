@@ -9,6 +9,7 @@ import logging
 import platform
 
 from PyQt6.QtCore import QPoint
+from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import QApplication
 
 from xgen.utils.rect import Rect

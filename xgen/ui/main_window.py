@@ -5,6 +5,7 @@ Assembles three-panel inspector layout, toolbar, status bar, and coordinates cor
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import os
 from typing import Optional
@@ -12,6 +13,7 @@ from PyQt6.QtCore import Qt, QPoint, QTimer, QEvent
 from PyQt6.QtGui import QCloseEvent, QCursor, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -38,7 +40,7 @@ from xgen.capture.transient_capture import TransientCapturer
 from xgen.config import ConfigManager, XGenConfig
 from xgen.core.driver_runner import DriverRunner
 from xgen.core.element_bridge import ElementBridge
-from xgen.core.session_manager import SessionManager, WindowInfo
+from xgen.core.session_manager import SessionManager, SessionState, WindowInfo
 from xgen.core.tree_cache import TreeCacheStore
 from xgen.core.tree_fetcher import TreeFetcher
 from xgen.core.tree_parser import TreeParser, UINode
@@ -49,6 +51,7 @@ from xgen.ui.disambiguation_popup import DisambiguationPopup
 from xgen.ui.legend_dialog import LegendDialog
 from xgen.ui.session_dialog import SessionDialog
 from xgen.ui.status_bar import StatusBar
+from xgen.ui.theme import format_session_error, show_styled_message_box
 from xgen.ui.toolbar import Toolbar
 from xgen.ui.tree_panel import TreePanel
 from xgen.ui.xpath_panel import XPathPanel
@@ -142,16 +145,33 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central_widget)
         layout.setContentsMargins(4, 4, 4, 4)
 
+        self.setMinimumSize(920, 560)
+
         # Main Splitter: Left (TreePanel) | Right (RightSplitter: XPathPanel on Top + Collapsible AttributePanel on Bottom)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(1)
+        self.splitter.setChildrenCollapsible(True)
+        self.splitter.setCollapsible(0, True)   # Allow tree panel to collapse to 0px when dragged past minimum
+        self.splitter.setCollapsible(1, False)  # Right inspector panel should not collapse
+        self.tree_panel.setMinimumWidth(350)    # Safe minimum width when open
         self.splitter.addWidget(self.tree_panel)
 
         # Right Vertical Splitter: Top (XPathPanel) | Bottom (AttributePanel)
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.setHandleWidth(1)
+        self.right_splitter.setChildrenCollapsible(False)
+        self.right_splitter.setCollapsible(0, False)   # XPathPanel cannot be crushed
+        self.right_splitter.setCollapsible(1, False)  # AttributePanel stops at 32px header, cannot collapse to 0px
+        self.right_splitter.setMinimumWidth(480)
+        self.xpath_panel.setMinimumWidth(320)
+        self.xpath_panel.setMinimumHeight(200)        # Guarantees space to always show at least one full XPath card
+        self.attr_panel.setMinimumHeight(32)          # Minimum height is the header bar
+        self.attr_panel.setMaximumHeight(380)         # Upper cap so attributes cannot crush XPath panel
         self.right_splitter.addWidget(self.xpath_panel)
         self.right_splitter.addWidget(self.attr_panel)
         self.right_splitter.setStretchFactor(0, 7)
         self.right_splitter.setStretchFactor(1, 3)
+        self.right_splitter.splitterMoved.connect(self._on_right_splitter_moved)
 
         self.splitter.addWidget(self.right_splitter)
 
@@ -167,6 +187,7 @@ class MainWindow(QMainWindow):
 
     def _wire_signals(self, start_hooks: bool = True) -> None:
         # Toolbar actions
+        self.toolbar.fast_connect_requested.connect(self._on_fast_connect_requested)
         self.toolbar.connect_requested.connect(self._open_session_dialog)
         self.toolbar.disconnect_requested.connect(self._on_disconnect_requested)
         self.toolbar.refresh_requested.connect(lambda: self.tree_fetcher.fetch_full())
@@ -240,8 +261,43 @@ class MainWindow(QMainWindow):
         dialog = LegendDialog(self)
         dialog.exec()
 
+    def _on_fast_connect_requested(self) -> None:
+        """Fast-Connect / Reconnect to target with current config or default root."""
+        if self.session_manager.state in (SessionState.CONNECTING, SessionState.CONNECTED):
+            return
+        logger.info("Fast-connect requested via status dot.")
+        self.status_bar.lbl_msg.setText("Connecting...")
+        self.session_manager.connect(self.config)
+
     def _on_disconnect_requested(self) -> None:
-        logger.info("User requested session disconnect.")
+        if self.session_manager.state != SessionState.CONNECTED:
+            return
+        if getattr(self.config, "confirm_disconnect", True):
+            app_name = (self.session_manager.session_info.app_name if self.session_manager.session_info else "") or "current target"
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Disconnect Session?")
+            msg_box.setText(
+                f"Are you sure you want to disconnect from <b>{app_name}</b>?<br><br>"
+                "This will terminate the active inspection session and clear the current tree."
+            )
+            msg_box.setIcon(QMessageBox.Icon.Question)
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+            msg_box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+
+            cb_remember = QCheckBox("Remember my choice (don't ask again)")
+            cb_remember.setStyleSheet("QCheckBox { color: #cbd5e1; font-size: 11px; margin-top: 8px; }")
+            msg_box.setCheckBox(cb_remember)
+
+            reply = msg_box.exec()
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            if cb_remember.isChecked():
+                self.config.confirm_disconnect = False
+                ConfigManager.save(self.config)
+
+        logger.info("User confirmed session disconnect.")
+        self.tree_fetcher.cancel()
         self.session_manager.disconnect()
         self.tree_panel.populate(None)
         self.attr_panel.clear()
@@ -287,8 +343,15 @@ class MainWindow(QMainWindow):
         self.tree_fetcher.fetch_full(info.active_handle)
 
     def _on_session_error(self, err: str) -> None:
-        self.status_bar.lbl_msg.setText(f"Error: {err}")
-        QMessageBox.warning(self, "xGen — Session Error", err)
+        title, friendly_msg, tech_details = format_session_error(err)
+        self.status_bar.lbl_msg.setText(f"Error: {title}")
+        show_styled_message_box(
+            self,
+            title=title,
+            text=friendly_msg,
+            icon=QMessageBox.Icon.Warning,
+            detailed_text=tech_details
+        )
 
     def _on_tree_fetch_complete(self, handle: str, raw_xml: str, root: UINode) -> None:
         self.status_bar.hide_progress()
@@ -376,9 +439,17 @@ class MainWindow(QMainWindow):
         self._on_node_selected_in_tree(transient_root)
 
     def _on_pin_toggled(self, on: bool) -> None:
-        """Keep xGen floating on top of other windows while inspecting."""
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
-        self.show()
+        """Keep xGen floating on top of other windows while inspecting (seamless zero-blink)."""
+        hwnd = int(self.winId())
+        HWND_TOPMOST = -1
+        HWND_NOTOPMOST = -2
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_NOACTIVATE = 0x0010
+        flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+
+        target_insert = HWND_TOPMOST if on else HWND_NOTOPMOST
+        ctypes.windll.user32.SetWindowPos(hwnd, target_insert, 0, 0, 0, 0, flags)
 
     def changeEvent(self, event: object) -> None:
         """Auto-deactivate inspect mode when xGen is minimized."""
@@ -512,18 +583,36 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _on_right_splitter_moved(self, pos: int, index: int) -> None:
+        """Auto-collapse/expand attribute panel visually when dragged past safe threshold (95px minimum for 1 table entry)."""
+        sizes = self.right_splitter.sizes()
+        if len(sizes) != 2:
+            return
+
+        attr_h = sizes[1]
+        # Dragged below 95px (cannot comfortably show 1 table entry) -> Auto-collapse table into header bar!
+        if not self.attr_panel.is_collapsed and attr_h < 95:
+            total = sizes[0] + sizes[1]
+            self._saved_right_splitter_sizes = [max(200, total - 250), 250]
+            self.attr_panel.set_collapsed(True, emit_signal=False)
+        # Dragged up above 95px (enough height for column headers + 1 full row) -> Auto-expand table!
+        elif self.attr_panel.is_collapsed and attr_h >= 95:
+            self.attr_panel.set_collapsed(False, emit_signal=False)
+
     def _on_attr_panel_collapsed_toggled(self, is_collapsed: bool) -> None:
         """Dynamically redistribute vertical splitter space when attribute panel collapses or expands."""
+        current_sizes = self.right_splitter.sizes()
+        total_h = sum(current_sizes) if current_sizes else 1000
         if is_collapsed:
-            current_sizes = self.right_splitter.sizes()
-            if len(current_sizes) == 2 and current_sizes[1] > 50:
+            if len(current_sizes) == 2 and current_sizes[1] > 60:
                 self._saved_right_splitter_sizes = current_sizes
-            self.right_splitter.setSizes([10000, 32])
+            self.right_splitter.setSizes([total_h - 32, 32])
         else:
             if hasattr(self, "_saved_right_splitter_sizes") and self._saved_right_splitter_sizes:
                 self.right_splitter.setSizes(self._saved_right_splitter_sizes)
             else:
-                self.right_splitter.setSizes([700, 300])
+                target_attr = min(260, total_h // 3)
+                self.right_splitter.setSizes([total_h - target_attr, target_attr])
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Gracefully release threads, hooks, and save state on application exit."""

@@ -10,10 +10,12 @@ from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -41,11 +43,12 @@ class SessionDialog(QDialog):
         self.setModal(True)
         self.setStyleSheet("""
             QDialog { background: #0f1115; color: #f1f5f9; font-family: 'Segoe UI', system-ui, sans-serif; }
-            QGroupBox { background: #14171e; border: 1px solid #232834; border-radius: 8px; margin-top: 14px; padding-top: 16px; padding-left: 10px; padding-right: 10px; padding-bottom: 10px; font-weight: 600; color: #93c5fd; font-size: 11px; }
-            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 14px; padding: 0 4px; background: transparent; }
-            QRadioButton { color: #cbd5e1; font-size: 11px; spacing: 8px; padding: 4px 0; }
-            QRadioButton::indicator { width: 14px; height: 14px; border-radius: 7px; border: 1px solid #3b82f6; background: #181c24; }
-            QRadioButton::indicator:checked { background: #3b82f6; border: 3px solid #14171e; }
+            QFrame#card { background-color: #14171e; border: 1px solid #232834; border-radius: 8px; }
+            QLabel#section_title { color: #60a5fa; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; margin-top: 4px; }
+            QRadioButton { color: #cbd5e1; font-size: 11px; spacing: 8px; padding: 3px 0; }
+            QRadioButton::indicator { width: 14px; height: 14px; border-radius: 7px; border: 1px solid #475569; background: #181c24; }
+            QRadioButton::indicator:hover { border-color: #3b82f6; }
+            QRadioButton::indicator:checked { width: 14px; height: 14px; border-radius: 7px; border: 1px solid #3b82f6; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #3b82f6, stop:0.55 #3b82f6, stop:0.6 #181c24, stop:1.0 #181c24); }
             QRadioButton:hover { color: #ffffff; }
             QLineEdit { background: #181c24; color: #f1f5f9; border: 1px solid #2a3140; border-radius: 6px; padding: 6px 10px; font-size: 11px; }
             QLineEdit:focus { border-color: #3b82f6; }
@@ -54,7 +57,10 @@ class SessionDialog(QDialog):
             QLabel:disabled { color: #475569; }
             QComboBox { background: #181c24; color: #f1f5f9; border: 1px solid #2a3140; border-radius: 6px; padding: 6px 10px; font-size: 11px; }
             QComboBox:hover { border-color: #3b82f6; }
-            QComboBox QAbstractItemView { background: #181c24; color: #f1f5f9; selection-background-color: #2563eb; selection-color: #ffffff; border: 1px solid #2a3140; border-radius: 4px; padding: 4px; }
+            QComboBox QAbstractItemView { background: #14171e; color: #cbd5e1; selection-background-color: #2563eb; selection-color: #ffffff; border: 1px solid #28303f; border-radius: 6px; padding: 4px; outline: none; }
+            QComboBox QAbstractItemView::item { min-height: 24px; padding: 4px 10px; border-radius: 4px; border-bottom: 1px solid #1e2430; margin: 1px 0px; }
+            QComboBox QAbstractItemView::item:hover { background-color: #1e2533; color: #ffffff; }
+            QComboBox QAbstractItemView::item:selected { background-color: #2563eb; color: #ffffff; font-weight: 500; }
             QPushButton { background: #1e2430; color: #cbd5e1; border: 1px solid #2e384d; border-radius: 6px; padding: 6px 14px; font-size: 11px; font-weight: 500; }
             QPushButton:hover { background: #2b3548; color: #ffffff; border-color: #3b82f6; }
         """)
@@ -65,12 +71,19 @@ class SessionDialog(QDialog):
 
     def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(14)
+        main_layout.setSpacing(10)
         main_layout.setContentsMargins(16, 16, 16, 16)
 
-        # 1. Mode Selection Group
-        mode_group = QGroupBox("Inspection Target Mode")
-        mode_layout = QVBoxLayout(mode_group)
+        # 1. Mode Selection Card
+        lbl_mode = QLabel("INSPECTION TARGET MODE")
+        lbl_mode.setObjectName("section_title")
+        main_layout.addWidget(lbl_mode)
+
+        mode_card = QFrame()
+        mode_card.setObjectName("card")
+        mode_layout = QVBoxLayout(mode_card)
+        mode_layout.setContentsMargins(12, 10, 12, 10)
+        mode_layout.setSpacing(6)
 
         self.radio_root = QRadioButton("Desktop Root (Recommended — inspect multi-window apps like Teams/Outlook)")
         self.radio_launch = QRadioButton("Launch Application (.exe path)")
@@ -86,11 +99,18 @@ class SessionDialog(QDialog):
         mode_layout.addWidget(self.radio_root)
         mode_layout.addWidget(self.radio_launch)
         mode_layout.addWidget(self.radio_attach)
-        main_layout.addWidget(mode_group)
+        main_layout.addWidget(mode_card)
 
-        # 2. Connection Details Form
-        form_group = QGroupBox("Target Configuration")
-        form_layout = QFormLayout(form_group)
+        # 2. Connection Details Form Card
+        lbl_target = QLabel("TARGET CONFIGURATION")
+        lbl_target.setObjectName("section_title")
+        main_layout.addWidget(lbl_target)
+
+        form_card = QFrame()
+        form_card.setObjectName("card")
+        form_layout = QFormLayout(form_card)
+        form_layout.setContentsMargins(12, 10, 12, 10)
+        form_layout.setSpacing(8)
         form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         # App path field + Browse button
@@ -119,25 +139,47 @@ class SessionDialog(QDialog):
         url_row.addWidget(btn_test_url)
         form_layout.addRow("Appium URL:", url_row)
 
-        main_layout.addWidget(form_group)
+        main_layout.addWidget(form_card)
 
-        # 3. Recent Sessions
-        recent_group = QGroupBox("Recent Configurations")
-        recent_layout = QHBoxLayout(recent_group)
+        # 3. Recent Configurations Card
+        lbl_recent = QLabel("RECENT CONFIGURATIONS")
+        lbl_recent.setObjectName("section_title")
+        main_layout.addWidget(lbl_recent)
+
+        recent_card = QFrame()
+        recent_card.setObjectName("card")
+        recent_layout = QHBoxLayout(recent_card)
+        recent_layout.setContentsMargins(12, 10, 12, 10)
+        recent_layout.setSpacing(8)
         self.recent_combo = QComboBox()
         self.recent_combo.setPlaceholderText("Select a recent session...")
+        if self.recent_combo.view() and self.recent_combo.view().window():
+            self.recent_combo.view().window().setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self.recent_combo.view().window().setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
         btn_load_recent = QPushButton("Load")
         btn_load_recent.clicked.connect(self._load_selected_recent)
         recent_layout.addWidget(self.recent_combo, 1)
         recent_layout.addWidget(btn_load_recent)
-        main_layout.addWidget(recent_group)
+        main_layout.addWidget(recent_card)
 
-        # 4. Status Indicator Banner
+        # 4. Options / Preferences
+        self.chk_confirm_disconnect = QCheckBox("Ask confirmation before disconnecting active session")
+        self.chk_confirm_disconnect.setToolTip("Show a confirmation prompt when clicking the connected status dot to disconnect")
+        self.chk_confirm_disconnect.setStyleSheet("""
+            QCheckBox { color: #cbd5e1; font-size: 11px; padding: 2px 0; }
+            QCheckBox:hover { color: #ffffff; }
+            QCheckBox::indicator { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #334155; background: #181c24; }
+            QCheckBox::indicator:checked { background: #2563eb; border-color: #3b82f6; }
+        """)
+        self.chk_confirm_disconnect.toggled.connect(self._on_confirm_disconnect_toggled)
+        main_layout.addWidget(self.chk_confirm_disconnect)
+
+        # 5. Status Indicator Banner
         self.lbl_status = QLabel("Checking Appium server status...")
         self.lbl_status.setStyleSheet("background: #1e2433; color: #94a3b8; border: 1px solid #2e384d; border-radius: 6px; padding: 6px 10px; font-size: 11px;")
         main_layout.addWidget(self.lbl_status)
 
-        # 5. Dialog Buttons
+        # 6. Dialog Buttons
         button_row = QHBoxLayout()
         button_row.addStretch()
 
@@ -156,10 +198,15 @@ class SessionDialog(QDialog):
 
         self._update_field_visibility()
 
+    def _on_confirm_disconnect_toggled(self, checked: bool) -> None:
+        self.config.confirm_disconnect = checked
+        ConfigManager.save(self.config)
+
     def _populate_from_config(self, cfg: XGenConfig) -> None:
         self.appium_url_edit.setText(cfg.appium_url or "http://127.0.0.1:4723")
         self.app_path_edit.setText(cfg.app_path or "")
         self.window_handle_edit.setText(cfg.app_top_level_window or "")
+        self.chk_confirm_disconnect.setChecked(getattr(cfg, "confirm_disconnect", True))
 
         if cfg.app_top_level_window:
             self.radio_attach.setChecked(True)
@@ -253,6 +300,7 @@ class SessionDialog(QDialog):
         self.config.appium_url = url
         self.config.app_path = app_path if app_path != "Root" else ""
         self.config.app_top_level_window = app_window
+        self.config.confirm_disconnect = self.chk_confirm_disconnect.isChecked()
 
         # Add to recents
         session_name = Path(app_path).stem if app_path and app_path != "Root" else (f"Window {app_window}" if app_window else "Desktop Root")

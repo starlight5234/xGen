@@ -68,13 +68,13 @@ class TreePanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(8)
 
-        # 1. Search Filter Bar
-        search_layout = QHBoxLayout()
-        search_layout.setSpacing(4)
+        # 1. Search Filter Bar with Built-in Embedded Clear Button
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("🔍 Filter elements (Name, ID, Class)...")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setFixedHeight(28)
         self.search_edit.setStyleSheet(
-            "QLineEdit { background: #181c24; color: #f1f5f9; border: 1px solid #2a3140; border-radius: 6px; padding: 6px 10px; font-size: 11px; }"
+            "QLineEdit { background: #181c24; color: #f1f5f9; border: 1px solid #2a3140; border-radius: 6px; padding: 4px 8px; font-size: 11px; }"
             "QLineEdit:focus { border-color: #3b82f6; }"
         )
         self._search_timer = QTimer(self)
@@ -82,16 +82,7 @@ class TreePanel(QWidget):
         self._search_timer.setInterval(250)
         self._search_timer.timeout.connect(self._perform_search)
         self.search_edit.textChanged.connect(lambda: self._search_timer.start())
-
-        btn_clear = QPushButton("✕")
-        btn_clear.setMaximumWidth(24)
-        btn_clear.setToolTip("Clear search filter")
-        btn_clear.setStyleSheet("QPushButton { background: transparent; color: #64748b; border: none; font-weight: bold; font-size: 11px; } QPushButton:hover { color: #f1f5f9; }")
-        btn_clear.clicked.connect(self.search_edit.clear)
-
-        search_layout.addWidget(self.search_edit)
-        search_layout.addWidget(btn_clear)
-        layout.addLayout(search_layout)
+        layout.addWidget(self.search_edit)
 
         # 2. Main QTreeWidget
         self.tree_widget = QTreeWidget()
