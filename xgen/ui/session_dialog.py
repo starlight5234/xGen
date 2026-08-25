@@ -3,12 +3,12 @@ Session Setup and Connection Dialog.
 Allows user to launch apps, attach to windows, or inspect Desktop root.
 """
 
-from __future__ import annotations
-
+import datetime
 from pathlib import Path
 from typing import Optional
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -30,6 +30,19 @@ from xgen.config import ConfigManager, RecentSession, XGenConfig
 from xgen.core.session_manager import SessionManager
 
 
+class PingWorker(QObject):
+    """Background worker to check Appium reachability without UI blocking or flicker."""
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, url: str):
+        super().__init__()
+        self.url = url
+
+    def run(self) -> None:
+        is_running, msg = SessionManager.check_server_status(self.url, timeout_seconds=1.5)
+        self.finished.emit(is_running, msg)
+
+
 class SessionDialog(QDialog):
     """Modal dialog to configure and initiate an Appium Windows Driver session."""
     session_requested = pyqtSignal(object)  # XGenConfig
@@ -38,6 +51,8 @@ class SessionDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.session_manager = session_manager
+        self._ping_thread: Optional[QThread] = None
+        self._ping_worker: Optional[PingWorker] = None
         self.setWindowTitle("xGen — Connect Session")
         self.setMinimumWidth(540)
         self.setModal(True)
@@ -132,11 +147,12 @@ class SessionDialog(QDialog):
 
         # Appium Server URL
         self.appium_url_edit = QLineEdit("http://127.0.0.1:4723")
-        btn_test_url = QPushButton("Ping Status")
-        btn_test_url.clicked.connect(self.check_server_status)
+        self.btn_test_url = QPushButton("Ping Status")
+        self.btn_test_url.setFixedWidth(100)
+        self.btn_test_url.clicked.connect(self.check_server_status)
         url_row = QHBoxLayout()
         url_row.addWidget(self.appium_url_edit)
-        url_row.addWidget(btn_test_url)
+        url_row.addWidget(self.btn_test_url)
         form_layout.addRow("Appium URL:", url_row)
 
         main_layout.addWidget(form_card)
@@ -268,13 +284,44 @@ class SessionDialog(QDialog):
 
     def check_server_status(self) -> None:
         url = self.appium_url_edit.text().strip() or "http://127.0.0.1:4723"
-        is_running, msg = SessionManager.check_server_status(url, timeout_seconds=1.5)
+
+        # Prevent duplicate in-flight pings
+        if self._ping_thread and self._ping_thread.isRunning():
+            return
+
+        if hasattr(self, "btn_test_url"):
+            self.btn_test_url.setEnabled(False)
+            self.btn_test_url.setText("Pinging...")
+
+        self.lbl_status.setText(f"⏳ Pinging Appium server at {url}...")
+
+        self._ping_thread = QThread(self)
+        self._ping_worker = PingWorker(url)
+        self._ping_worker.moveToThread(self._ping_thread)
+
+        self._ping_thread.started.connect(self._ping_worker.run)
+        self._ping_worker.finished.connect(self._on_ping_finished)
+        self._ping_worker.finished.connect(self._ping_thread.quit)
+        self._ping_thread.start()
+
+    def _on_ping_finished(self, is_running: bool, msg: str) -> None:
+        now_str = datetime.datetime.now().strftime("%H:%M:%S")
         if is_running:
-            self.lbl_status.setText(f"✅ {msg}")
+            self.lbl_status.setText(f"[{now_str}] ✅ {msg}")
             self.lbl_status.setStyleSheet("background: #064e3b; color: #34d399; border: 1px solid #059669; border-radius: 6px; padding: 6px 10px; font-weight: 600; font-size: 11px;")
         else:
-            self.lbl_status.setText(f"❌ {msg}")
+            self.lbl_status.setText(f"[{now_str}] ❌ {msg}")
             self.lbl_status.setStyleSheet("background: #450a0a; color: #f87171; border: 1px solid #dc2626; border-radius: 6px; padding: 6px 10px; font-weight: 600; font-size: 11px;")
+
+        if hasattr(self, "btn_test_url"):
+            self.btn_test_url.setEnabled(True)
+            self.btn_test_url.setText("Ping Status")
+
+    def reject(self) -> None:
+        if self._ping_thread and self._ping_thread.isRunning():
+            self._ping_thread.quit()
+            self._ping_thread.wait(500)
+        super().reject()
 
     def _on_connect_clicked(self) -> None:
         url = self.appium_url_edit.text().strip() or "http://127.0.0.1:4723"
