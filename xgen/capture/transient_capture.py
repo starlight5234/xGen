@@ -19,10 +19,10 @@ except ImportError:
     win32api = None        # type: ignore
     HAS_PYWIN32 = False
 
-import uiautomation as auto
 from xgen.core.tree_cache import TreeCacheStore
 from xgen.core.tree_parser import TreeParser, UINode
 from xgen.core.uia_bridge import UIABridge, UIAElement
+from xgen.utils.dpi import get_physical_cursor_pos
 from xgen.utils.rect import Rect
 
 logger = logging.getLogger("xgen.transient")
@@ -135,11 +135,7 @@ class TransientCapturer(QObject):
         if self._seconds_left <= 0:
             self.cancel_timed_capture()
             # Perform desktop-wide transient scan
-            if HAS_PYWIN32 and win32api:
-                x, y = win32api.GetCursorPos()
-            else:
-                pos = QCursor.pos()
-                x, y = pos.x(), pos.y()
+            x, y = get_physical_cursor_pos()
             self.freeze_snapshot(x, y, active_handle)
 
     # --- Mechanism 3: Automatic Structure Changed Hook ---

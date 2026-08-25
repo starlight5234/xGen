@@ -48,11 +48,48 @@ def init_dpi_awareness() -> None:
         logger.warning("Failed to set DPI awareness: %s", e)
 
 
+class POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+def get_physical_cursor_pos() -> tuple[int, int]:
+    """
+    Return the current mouse cursor position in physical screen coordinates.
+    Works universally across all Windows versions (7, 8, 10, 11) via native Win32 GetCursorPos.
+    """
+    if platform.system() == "Windows":
+        try:
+            pt = POINT()
+            if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+                return int(pt.x), int(pt.y)
+        except Exception:
+            pass
+
+    # Fallback using Qt logical position converted to physical
+    pos = QCursor.pos()
+    dpr = get_screen_dpr_at(pos.x(), pos.y())
+    return int(pos.x() * dpr), int(pos.y() * dpr)
+
+
 def get_screen_dpr_at(x: int, y: int) -> float:
     """Return the device pixel ratio (scaling factor e.g. 1.0, 1.25, 1.5, 2.0) for the screen at (x, y)."""
     app = QApplication.instance()
     if not app:
         return 1.0
+
+    # 1. Match physical screen bounds across all active displays
+    screens = app.screens()
+    for s in screens:
+        dpr = float(s.devicePixelRatio()) or 1.0
+        geom = s.geometry()  # logical geometry
+        phys_left = int(geom.x() * dpr)
+        phys_top = int(geom.y() * dpr)
+        phys_right = phys_left + int(geom.width() * dpr)
+        phys_bottom = phys_top + int(geom.height() * dpr)
+        if phys_left <= x < phys_right and phys_top <= y < phys_bottom:
+            return dpr
+        if geom.left() <= x < geom.right() and geom.top() <= y < geom.bottom():
+            return dpr
 
     screen = app.screenAt(QPoint(x, y))
     if screen is not None:

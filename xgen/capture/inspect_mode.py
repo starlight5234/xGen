@@ -17,6 +17,7 @@ from xgen.config import XGenConfig
 from xgen.core.tree_cache import TreeCacheStore
 from xgen.core.tree_parser import TreeParser
 from xgen.core.uia_bridge import UIABridge, UIAElement
+from xgen.utils.dpi import get_physical_cursor_pos
 
 logger = logging.getLogger("xgen.inspect")
 
@@ -111,8 +112,7 @@ class InspectMode(QObject):
         if not self._is_active:
             return
 
-        cursor_pos = QCursor.pos()
-        x, y = cursor_pos.x(), cursor_pos.y()
+        x, y = get_physical_cursor_pos()
 
         # Check if cursor is over xGen's own window
         if self._window_filter and not self._window_filter(x, y):

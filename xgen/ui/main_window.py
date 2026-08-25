@@ -52,7 +52,7 @@ from xgen.ui.status_bar import StatusBar
 from xgen.ui.toolbar import Toolbar
 from xgen.ui.tree_panel import TreePanel
 from xgen.ui.xpath_panel import XPathPanel
-from xgen.utils.dpi import get_screen_dpr_at
+from xgen.utils.dpi import get_physical_cursor_pos, get_screen_dpr_at
 
 logger = logging.getLogger("xgen.ui.main")
 
@@ -354,11 +354,7 @@ class MainWindow(QMainWindow):
 
     def _on_f4_freeze_shortcut(self) -> None:
         """Capture transient element under cursor without focus shift."""
-        if HAS_PYWIN32 and win32api:
-            x, y = win32api.GetCursorPos()
-        else:
-            pos = QCursor.pos()
-            x, y = pos.x(), pos.y()
+        x, y = get_physical_cursor_pos()
         active_handle = self.session_manager.session_info.active_handle if self.session_manager.session_info else ""
         self.status_bar.lbl_msg.setText("Capturing transient snapshot (F4)...")
         self.transient_capturer.freeze_snapshot(x, y, active_handle)
