@@ -191,10 +191,13 @@ def test_session_dialog_confirm_disconnect_setting(qapp):
     from xgen.core.session_manager import SessionManager
 
     sm = SessionManager()
-    cfg = XGenConfig(confirm_disconnect=True)
-    dlg = SessionDialog(cfg, sm)
-    assert dlg.chk_confirm_disconnect.isChecked() is True
+    try:
+        cfg = XGenConfig(confirm_disconnect=True)
+        dlg = SessionDialog(cfg, sm, auto_check=False)
+        assert dlg.chk_confirm_disconnect.isChecked() is True
 
-    dlg.chk_confirm_disconnect.setChecked(False)
-    assert dlg.config.confirm_disconnect is False
-    dlg.close()
+        dlg.chk_confirm_disconnect.setChecked(False)
+        assert dlg.config.confirm_disconnect is False
+        dlg.close()
+    finally:
+        sm.close()

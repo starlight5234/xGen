@@ -20,15 +20,16 @@ def qapp():
 def test_session_dialog_initialization(qapp):
     cfg = XGenConfig(appium_url="http://127.0.0.1:4723", app_path="C:\\app.exe")
     mgr = SessionManager()
+    try:
+        dlg = SessionDialog(cfg, mgr, auto_check=False)
+        assert dlg.app_path_edit.text() == "C:\\app.exe"
+        assert dlg.radio_launch.isChecked() is True
+        assert dlg.appium_url_edit.text() == "http://127.0.0.1:4723"
 
-    dlg = SessionDialog(cfg, mgr)
-    assert dlg.app_path_edit.text() == "C:\\app.exe"
-    assert dlg.radio_launch.isChecked() is True
-    assert dlg.appium_url_edit.text() == "http://127.0.0.1:4723"
-
-    # Switch to Root mode
-    dlg.radio_root.setChecked(True)
-    dlg._on_mode_changed()
-    assert dlg.app_path_edit.isEnabled() is False
-
-    mgr.close()
+        # Switch to Root mode
+        dlg.radio_root.setChecked(True)
+        dlg._on_mode_changed()
+        assert dlg.app_path_edit.isEnabled() is False
+        dlg.close()
+    finally:
+        mgr.close()

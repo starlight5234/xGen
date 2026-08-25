@@ -37,17 +37,25 @@ class PingWorker(QObject):
     def __init__(self, url: str):
         super().__init__()
         self.url = url
+        self._is_cancelled = False
+
+    def cancel(self) -> None:
+        self._is_cancelled = True
 
     def run(self) -> None:
         is_running, msg = SessionManager.check_server_status(self.url, timeout_seconds=1.5)
-        self.finished.emit(is_running, msg)
+        if not self._is_cancelled:
+            try:
+                self.finished.emit(is_running, msg)
+            except RuntimeError:
+                pass
 
 
 class SessionDialog(QDialog):
     """Modal dialog to configure and initiate an Appium Windows Driver session."""
     session_requested = pyqtSignal(object)  # XGenConfig
 
-    def __init__(self, config: XGenConfig, session_manager: SessionManager, parent: Optional[QWidget] = None):
+    def __init__(self, config: XGenConfig, session_manager: SessionManager, parent: Optional[QWidget] = None, auto_check: bool = True):
         super().__init__(parent)
         self.config = config
         self.session_manager = session_manager
@@ -82,7 +90,8 @@ class SessionDialog(QDialog):
 
         self._init_ui()
         self._populate_from_config(config)
-        self.check_server_status()
+        if auto_check:
+            self.check_server_status()
 
     def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
@@ -318,10 +327,29 @@ class SessionDialog(QDialog):
             self.btn_test_url.setText("Ping Status")
 
     def reject(self) -> None:
+        self._stop_ping_thread()
+        super().reject()
+
+    def closeEvent(self, event: object) -> None:
+        self._stop_ping_thread()
+        super().closeEvent(event)
+
+    def close(self) -> bool:
+        self._stop_ping_thread()
+        return super().close()
+
+    def _stop_ping_thread(self) -> None:
+        if self._ping_worker:
+            self._ping_worker.cancel()
+            try:
+                self._ping_worker.finished.disconnect()
+            except Exception:
+                pass
         if self._ping_thread and self._ping_thread.isRunning():
             self._ping_thread.quit()
-            self._ping_thread.wait(500)
-        super().reject()
+            self._ping_thread.wait(600)
+        self._ping_thread = None
+        self._ping_worker = None
 
     def _on_connect_clicked(self) -> None:
         url = self.appium_url_edit.text().strip() or "http://127.0.0.1:4723"
