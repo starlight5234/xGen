@@ -6,6 +6,7 @@ Transparent, click-through, always-on-top frameless window drawing a bounding re
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 import logging
 import platform
 from typing import Optional
@@ -22,7 +23,6 @@ logger = logging.getLogger("xgen.overlay")
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_NOACTIVATE = 0x08000000
-HWND_TOPMOST = -1
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_NOACTIVATE = 0x0010
@@ -166,10 +166,14 @@ class OverlayWindow(QWidget):
             return
 
         try:
-            hwnd = int(self.winId())
+            hwnd = wintypes.HWND(int(self.winId()))
             user32 = ctypes.windll.user32
-            get_long = user32.GetWindowLongPtrW if hasattr(user32, "GetWindowLongPtrW") else user32.GetWindowLongW
-            set_long = user32.SetWindowLongPtrW if hasattr(user32, "SetWindowLongPtrW") else user32.SetWindowLongW
+            get_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+            set_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+            get_long.argtypes = [wintypes.HWND, ctypes.c_int]
+            get_long.restype = ctypes.c_long
+            set_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+            set_long.restype = ctypes.c_long
 
             cur_style = get_long(hwnd, GWL_EXSTYLE)
             new_style = cur_style | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
@@ -183,11 +187,22 @@ class OverlayWindow(QWidget):
             return
 
         try:
-            hwnd = int(self.winId())
+            hwnd = wintypes.HWND(int(self.winId()))
             user32 = ctypes.windll.user32
+            user32.SetWindowPos.argtypes = [
+                wintypes.HWND,
+                wintypes.HWND,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                wintypes.UINT,
+            ]
+            user32.SetWindowPos.restype = wintypes.BOOL
+            _HWND_TOPMOST = wintypes.HWND(ctypes.c_void_p(-1).value)
             user32.SetWindowPos(
                 hwnd,
-                HWND_TOPMOST,
+                _HWND_TOPMOST,
                 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW
             )

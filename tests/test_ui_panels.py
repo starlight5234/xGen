@@ -201,3 +201,56 @@ def test_session_dialog_confirm_disconnect_setting(qapp):
         dlg.close()
     finally:
         sm.close()
+
+
+def test_main_window_pin_toggle(qapp):
+    import platform
+    import ctypes
+    from ctypes import wintypes
+
+    WS_EX_TOPMOST = 0x00000008
+    GWL_EXSTYLE = -20
+
+    def is_topmost(hwnd: int) -> bool:
+        if platform.system() != "Windows":
+            return False
+        user32 = ctypes.windll.user32
+        user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.GetWindowLongW.restype = wintypes.LONG
+        return bool(user32.GetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE) & WS_EX_TOPMOST)
+
+    # 1. Test runtime toggle
+    cfg = XGenConfig(auto_connect_on_startup=False, pin_on_top=False)
+    win = MainWindow(cfg, start_hooks=False)
+    win.show()
+    QApplication.processEvents()
+
+    if platform.system() == "Windows":
+        assert not is_topmost(int(win.winId())), "Should not be topmost initially"
+    win.toolbar.btn_pin.click()  # Pin ON
+    QApplication.processEvents()
+    if platform.system() == "Windows":
+        assert is_topmost(int(win.winId())), "Should be topmost after clicking Pin"
+    win.toolbar.btn_pin.click()  # Pin OFF
+    QApplication.processEvents()
+    if platform.system() == "Windows":
+        assert not is_topmost(int(win.winId())), "Should not be topmost after clicking Unpin"
+
+    win.session_manager.close()
+    win.tree_fetcher.close()
+    win.close()
+
+    # 2. Test startup restore path
+    cfg2 = XGenConfig(auto_connect_on_startup=False, pin_on_top=True)
+    win2 = MainWindow(cfg2, start_hooks=False)
+    win2.show()
+    QApplication.processEvents()  # Let singleShot(0) fire
+    if platform.system() == "Windows":
+        assert is_topmost(int(win2.winId())), "Should be topmost when restored from config"
+
+    win2.toolbar.btn_pin.setChecked(False)  # Unpin cleanly before closing
+    QApplication.processEvents()
+    win2.session_manager.close()
+    win2.tree_fetcher.close()
+    win2.close()
+
