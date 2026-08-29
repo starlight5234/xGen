@@ -118,6 +118,9 @@ class SessionManager(QObject):
         self._session_id: Optional[str] = None
         self._base_url: str = "http://127.0.0.1:4723"
         self._http_session = requests.Session()
+        self._heartbeat_failures: int = 0
+        self._disconnect_requested: bool = False
+        self._delete_thread: Optional[threading.Thread] = None
 
         # Threading for background execution
         self._worker_thread = QThread()
@@ -144,15 +147,19 @@ class SessionManager(QObject):
         self._heartbeat_timer.timeout.connect(self._check_heartbeat)
 
     def close(self) -> None:
-        """Cleanup threads and close session."""
+        """Cleanup threads and close session without emitting signals to dead Qt widgets."""
         self._heartbeat_timer.stop()
+        self.blockSignals(True)
         if self._session_id:
             try:
                 self.disconnect()
             except Exception:
                 pass
+        if self._delete_thread and self._delete_thread.is_alive():
+            self._delete_thread.join(timeout=3.0)
         self._worker_thread.quit()
         self._worker_thread.wait(2000)
+        self.blockSignals(False)
 
     # --- Public API ---
 
@@ -185,6 +192,7 @@ class SessionManager(QObject):
         if self.state == SessionState.CONNECTED:
             logger.warning("Already connected to session, ignoring connect request.")
             return
+        self._disconnect_requested = False
         self.current_config = config
         self._base_url = config.appium_url.rstrip("/")
         self._set_state(SessionState.CONNECTING)
@@ -194,6 +202,7 @@ class SessionManager(QObject):
     def disconnect(self) -> None:
         """Terminate active session."""
         self._heartbeat_timer.stop()
+        self._disconnect_requested = True
         sid = self._session_id
         self._session_id = None
         self.session_info = None
@@ -206,7 +215,8 @@ class SessionManager(QObject):
                 except Exception as e:
                     logger.warning("Error deleting session %s: %s", sid, e)
 
-            threading.Thread(target=_delete, daemon=True).start()
+            self._delete_thread = threading.Thread(target=_delete, daemon=True)
+            self._delete_thread.start()
 
         self._set_state(SessionState.DISCONNECTED)
 
@@ -227,6 +237,11 @@ class SessionManager(QObject):
         Synchronous fetch of XML source (call from worker threads).
         """
         return self._fetch_source_internal(timeout_seconds)
+
+    @property
+    def http_session(self) -> requests.Session:
+        """Shared keep-alive HTTP session for all Appium REST calls."""
+        return self._http_session
 
     @property
     def session_id(self) -> Optional[str]:
@@ -294,22 +309,50 @@ class SessionManager(QObject):
                     first_sess = active_list[0]
                     sid = first_sess.get("id") or first_sess.get("sessionId")
                     if sid:
-                        logger.info("Reusing existing active Appium session: %s", sid)
-                        self._session_id = str(sid)
-                        windows = self._refresh_handles_internal()
-                        active_handle = windows[0].handle if windows else ""
                         caps = first_sess.get("capabilities", {})
-                        app_name = caps.get("appium:app") or caps.get("app") or "Active Session"
-                        if app_name != "Root" and "\\" in str(app_name):
-                            app_name = Path(app_name).stem
+                        existing_app = (caps.get("appium:app") or caps.get("app") or "").strip()
 
-                        return SessionInfo(
-                            session_id=str(sid),
-                            appium_url=base,
-                            app_name=str(app_name),
-                            windows=windows,
-                            active_handle=active_handle
+                        # Determine if reuse is appropriate
+                        user_wants_root = not app_target and not app_window
+                        existing_is_root = existing_app in ("Root", "", "root")
+                        existing_is_window = bool(caps.get("appium:appTopLevelWindow"))
+
+                        try:
+                            same_app = (
+                                existing_app
+                                and app_target
+                                and Path(existing_app).resolve() == Path(app_target).resolve()
+                            )
+                        except (OSError, ValueError):
+                            same_app = existing_app == app_target
+
+                        should_reuse = (
+                            (user_wants_root and existing_is_root)
+                            or same_app
+                            or (app_window and existing_is_window and caps.get("appium:appTopLevelWindow") == app_window)
                         )
+
+                        if should_reuse:
+                            logger.info("Reusing compatible Appium session: %s (app: %s)", sid, existing_app or "Root")
+                            self._session_id = str(sid)
+                            windows = self._refresh_handles_internal()
+                            active_handle = windows[0].handle if windows else ""
+                            app_name = existing_app or "Active Session"
+                            if app_name not in ("Root", "") and "\\" in app_name:
+                                app_name = Path(app_name).stem
+
+                            return SessionInfo(
+                                session_id=str(sid),
+                                appium_url=base,
+                                app_name=str(app_name),
+                                windows=windows,
+                                active_handle=active_handle
+                            )
+                        else:
+                            logger.info(
+                                "Existing session %s targets different app (%s). Creating new session for: %s.",
+                                sid, existing_app or "Root", app_target or app_window or "Root"
+                            )
         except Exception as e:
             logger.debug("Active sessions query note: %s", e)
 
@@ -344,7 +387,7 @@ class SessionManager(QObject):
         r = self._http_session.post(
             f"{base}/session",
             json=payload,
-            timeout=float(config.source_fetch_timeout_seconds)
+            timeout=float(config.session_connect_timeout_seconds)
         )
 
         if r.status_code not in (200, 201):
@@ -491,6 +534,20 @@ class SessionManager(QObject):
     # --- Callbacks ---
 
     def _on_connect_success(self, info: SessionInfo) -> None:
+        if self._disconnect_requested:
+            # User requested disconnect while connecting — delete in-flight session
+            sid = info.session_id
+            def _abort_delete():
+                try:
+                    self._http_session.delete(f"{self._base_url}/session/{sid}", timeout=5.0)
+                    logger.info("Aborted in-flight session %s (disconnect requested).", sid)
+                except Exception as e:
+                    logger.warning("Error aborting in-flight session %s: %s", sid, e)
+            self._delete_thread = threading.Thread(target=_abort_delete, daemon=True)
+            self._delete_thread.start()
+            self._set_state(SessionState.DISCONNECTED)
+            return
+
         self.session_info = info
         self._heartbeat_failures = 0
         self._set_state(SessionState.CONNECTED)

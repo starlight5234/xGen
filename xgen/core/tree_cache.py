@@ -152,8 +152,10 @@ class TreeCacheStore:
             # Merge into parsed UINode tree
             TreeParser.merge_subtree(cache.parsed_root, subtree)
 
-            # Reconstruct live lxml tree from updated UINode hierarchy
-            cache.lxml_tree = TreeParser.to_xml_element(cache.parsed_root)
+            # Reconstruct live lxml tree and node_map from updated UINode hierarchy
+            new_node_map: Dict[str, UINode] = {}
+            cache.lxml_tree = TreeParser.to_xml_element(cache.parsed_root, new_node_map)
+            cache.node_map = new_node_map
             cache.raw_xml = TreeParser.to_xml_string(cache.parsed_root)
             logger.info("Successfully merged transient subtree into cache for handle %s", target_handle)
         finally:

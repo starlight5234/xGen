@@ -92,7 +92,7 @@ class DriverRunner(QObject):
         with self._driver_lock:
             t0 = time.perf_counter()
             try:
-                r = requests.post(url, json=payload, timeout=20.0)
+                r = self.session_manager.http_session.post(url, json=payload, timeout=20.0)
                 elapsed = (time.perf_counter() - t0) * 1000.0
 
                 if r.status_code == 200:
@@ -152,7 +152,7 @@ class DriverRunner(QObject):
 
         with self._driver_lock:
             try:
-                r = requests.post(url, json={}, timeout=10.0)
+                r = self.session_manager.http_session.post(url, json={}, timeout=10.0)
                 if r.status_code == 200:
                     self.action_completed.emit("Click", True, "Clicked successfully")
                     return True
@@ -177,7 +177,7 @@ class DriverRunner(QObject):
 
         with self._driver_lock:
             try:
-                r = requests.post(url, json=payload, timeout=10.0)
+                r = self.session_manager.http_session.post(url, json=payload, timeout=10.0)
                 if r.status_code == 200:
                     self.action_completed.emit("Type", True, f"Typed '{text}' successfully")
                     return True
@@ -213,7 +213,7 @@ class DriverRunner(QObject):
         }
         with self._driver_lock:
             try:
-                r = requests.post(f"{base_url}/session/{session_id}/actions", json=w3c_payload, timeout=5.0)
+                r = self.session_manager.http_session.post(f"{base_url}/session/{session_id}/actions", json=w3c_payload, timeout=5.0)
                 if r.status_code == 200:
                     self.action_completed.emit("Hover", True, "Hovered element successfully")
                     return True
@@ -222,7 +222,7 @@ class DriverRunner(QObject):
 
             # 2. Try JSONWP /moveto endpoint
             try:
-                r_moveto = requests.post(
+                r_moveto = self.session_manager.http_session.post(
                     f"{base_url}/session/{session_id}/moveto",
                     json={"element": test_res.element_id},
                     timeout=5.0
@@ -253,7 +253,7 @@ class DriverRunner(QObject):
         # 1. Try standard W3C /rect
         url_rect = f"{base_url}/session/{session_id}/element/{element_id}/rect"
         try:
-            r = requests.get(url_rect, timeout=2.0)
+            r = self.session_manager.http_session.get(url_rect, timeout=2.0)
             if r.status_code == 200:
                 v = r.json().get("value", {})
                 if isinstance(v, dict) and "x" in v and "width" in v:
@@ -270,8 +270,8 @@ class DriverRunner(QObject):
         try:
             url_loc = f"{base_url}/session/{session_id}/element/{element_id}/location"
             url_size = f"{base_url}/session/{session_id}/element/{element_id}/size"
-            r_loc = requests.get(url_loc, timeout=2.0)
-            r_size = requests.get(url_size, timeout=2.0)
+            r_loc = self.session_manager.http_session.get(url_loc, timeout=2.0)
+            r_size = self.session_manager.http_session.get(url_size, timeout=2.0)
             if r_loc.status_code == 200 and r_size.status_code == 200:
                 v_loc = r_loc.json().get("value", {})
                 v_size = r_size.json().get("value", {})

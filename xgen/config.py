@@ -36,6 +36,7 @@ class XGenConfig:
 
     tree_stale_warning_seconds: int = 60
     source_fetch_timeout_seconds: int = 60
+    session_connect_timeout_seconds: int = 90
     hover_poll_interval_ms: int = 100
     transient_node_ttl_minutes: int = 10
     large_tree_warning_threshold: int = 3000
@@ -97,8 +98,10 @@ class ConfigManager:
                 implicit_wait_ms=int(data.get("implicit_wait_ms", 0)),
                 auto_detect_new_windows=bool(data.get("auto_detect_new_windows", True)),
                 auto_connect_on_startup=bool(data.get("auto_connect_on_startup", True)),
+                confirm_disconnect=bool(data.get("confirm_disconnect", True)),
                 tree_stale_warning_seconds=int(data.get("tree_stale_warning_seconds", 60)),
                 source_fetch_timeout_seconds=int(data.get("source_fetch_timeout_seconds", 60)),
+                session_connect_timeout_seconds=int(data.get("session_connect_timeout_seconds", 90)),
                 hover_poll_interval_ms=int(data.get("hover_poll_interval_ms", 100)),
                 transient_node_ttl_minutes=int(data.get("transient_node_ttl_minutes", 10)),
                 large_tree_warning_threshold=int(data.get("large_tree_warning_threshold", 3000)),

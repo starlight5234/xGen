@@ -15,6 +15,7 @@ from xgen.core.tree_cache import WindowTreeCache
 from xgen.core.tree_parser import TreeParser, UINode
 from xgen.core.uia_bridge import UIAElement
 from xgen.utils.rect import Rect
+from xgen.utils.xpath_escape import escape_xpath_literal
 
 logger = logging.getLogger("xgen.bridge")
 
@@ -158,9 +159,11 @@ class ElementBridge:
         # Construct temporary single-attribute XPath
         temp_xpath = ""
         if uia_el.automation_id and not uia_el.automation_id.isdigit():
-            temp_xpath = f"//*[@AutomationId='{uia_el.automation_id}']"
+            esc = escape_xpath_literal(uia_el.automation_id)
+            temp_xpath = f"//*[@AutomationId={esc}]"
         elif uia_el.name:
-            temp_xpath = f"//{uia_el.control_type}[@Name='{uia_el.name}']"
+            esc = escape_xpath_literal(uia_el.name)
+            temp_xpath = f"//{uia_el.control_type}[@Name={esc}]"
 
         if temp_xpath:
             return session.find_element_by_xpath(temp_xpath)
