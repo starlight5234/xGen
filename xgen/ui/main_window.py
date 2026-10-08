@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -130,6 +131,17 @@ class MainWindow(QMainWindow):
 
         self.disambiguation_popup = DisambiguationPopup(self)
 
+        # 3b. Instantiate Recorder Core and UI
+        from xgen.recorder.composition import create_recorder
+        from xgen.ui.recorder.bridge import RecorderQtBridge
+        from xgen.ui.recorder.floating_overlay import FloatingRecorderOverlay
+
+        self.recorder_service = create_recorder()
+        self.recorder_bridge = RecorderQtBridge(self.recorder_service, self)
+        self._timeline_dialog: Optional[Any] = None
+        self._last_recording_meta: Optional[Any] = None
+        self.recorder_overlay = FloatingRecorderOverlay()
+
         # Window-picker enumeration bridge (see Issue 1 / Refresh-button ANR):
         # get_open_windows() runs on a background thread; results land here.
         self._window_enum_bridge = _WindowEnumBridge(self)
@@ -140,6 +152,13 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._restore_window_state()
         self._refresh_window_picker()
+
+        # Initialize last recording state on toolbar (greyed out if no recording exists)
+        try:
+            has_rec = bool(self.recorder_service.get_last_recording_meta())
+            self.toolbar.set_has_last_recording(has_rec)
+        except Exception as e:
+            logger.debug("Failed to check last recording on startup: %s", e)
 
         # Check for running Appium server and auto-connect on startup
         if self.config.auto_connect_on_startup:
@@ -276,6 +295,34 @@ class MainWindow(QMainWindow):
         # Disambiguation
         self.disambiguation_popup.node_chosen.connect(self._on_node_selected_in_tree)
 
+        # Recorder Toolbar & Overlay Controls
+        self.toolbar.record_requested.connect(self._on_f9_record_shortcut)
+        self.toolbar.show_last_recording_requested.connect(self._show_last_recording)
+        self.recorder_overlay.pause_requested.connect(self._on_recorder_pause)
+        self.recorder_overlay.resume_requested.connect(self._on_recorder_resume)
+        self.recorder_overlay.stop_requested.connect(self._on_recorder_stop)
+
+        self.toolbar.recorder_controls.start_requested.connect(self._on_recorder_start)
+        self.toolbar.recorder_controls.pause_requested.connect(self._on_recorder_pause)
+        self.toolbar.recorder_controls.resume_requested.connect(self._on_recorder_resume)
+        self.toolbar.recorder_controls.stop_requested.connect(self._on_recorder_stop)
+        self.toolbar.recorder_controls.toggle_panel_requested.connect(self._on_toggle_recorder_panel)
+
+        self.recorder_bridge.state_changed.connect(self._on_recorder_state_changed)
+        self.recorder_bridge.step_added.connect(self._on_recorder_step_added)
+        self.recorder_bridge.warning.connect(self._on_recorder_warning)
+        self.recorder_bridge.error.connect(self._on_recorder_error)
+
+        self.key_hook.f9_pressed.connect(self._on_f9_record_shortcut)
+        self.key_hook.f10_pressed.connect(self._on_f10_pause_shortcut)
+
+        # Check existing recording on disk to set initial overflow menu availability
+        try:
+            has_rec = self.recorder_service.get_last_recording_meta() is not None
+            self.toolbar.set_has_last_recording(has_rec)
+        except Exception:
+            pass
+
     def _setup_shortcuts(self) -> None:
         # In-app application shortcuts (F3, F4, Esc are handled globally via GlobalKeyHook)
         self.sc_refresh = QShortcut(QKeySequence("Ctrl+R"), self)
@@ -360,9 +407,161 @@ class MainWindow(QMainWindow):
 
     def _on_inspect_toggled(self, active: bool) -> None:
         if active:
+            st = self.recorder_service.status().state.value
+            if st in ("recording", "paused"):
+                QMessageBox.warning(
+                    self, "Inspect Mode",
+                    "Cannot enter Inspect Mode while recording is active.\n"
+                    "Please pause or stop the recording session first."
+                )
+                self.toolbar.btn_inspect.setChecked(False)
+                return
             self.inspect_mode.activate()
         else:
             self.inspect_mode.deactivate()
+
+    def _on_recorder_start(self) -> None:
+        if self.inspect_mode.is_active:
+            self.inspect_mode.deactivate()
+            self.toolbar.btn_inspect.setChecked(False)
+
+        from xgen.recorder.options import RecordingOptions, TargetScopeOptions
+        session_info = getattr(self.session_manager, "session_info", None)
+        name = getattr(session_info, "app_name", "") or getattr(session_info, "window_title", "") or "Recorded_Session"
+        dialect_key = "windows"
+        if hasattr(self.session_manager, "dialect") and hasattr(self.session_manager.dialect, "name"):
+            dialect_key = str(self.session_manager.dialect.name).lower()
+
+        opts = RecordingOptions(
+            name=name,
+            target_scope=TargetScopeOptions(exclude_pids=[os.getpid()]),
+            dialect_key=dialect_key
+        )
+        try:
+            self.recorder_service.start(opts)
+            if hasattr(self.toolbar, "btn_record"):
+                self.toolbar.btn_record.setText("⏹ Stop (F9)")
+                self.toolbar.btn_record.setStyleSheet(
+                    "QPushButton { background: #b91c1c; color: #ffffff; border: 1px solid #ef4444; border-radius: 6px; padding: 2px 13px 3px 13px; font-weight: 600; font-size: 11px; }"
+                )
+            # Show floating overlay pill
+            self.recorder_overlay.show_overlay()
+            # Auto-minimize xGen so it does not interfere with live desktop interaction
+            self.showMinimized()
+            self.status_bar.lbl_msg.setText(f"Recording '{name}' started. xGen minimized into floating overlay.")
+        except Exception as e:
+            QMessageBox.critical(self, "Recording Failed", f"Could not start recording session: {e}")
+
+    def _on_recorder_pause(self) -> None:
+        try:
+            self.recorder_service.pause()
+            self.recorder_overlay.set_paused(True)
+        except Exception as e:
+            logger.debug("Recorder pause error: %s", e)
+
+    def _on_recorder_resume(self) -> None:
+        try:
+            self.recorder_service.resume()
+            self.recorder_overlay.set_paused(False)
+        except Exception as e:
+            logger.debug("Recorder resume error: %s", e)
+
+    def _on_recorder_stop(self) -> None:
+        try:
+            meta = self.recorder_service.stop()
+            if hasattr(self.toolbar, "btn_record"):
+                self.toolbar.btn_record.setText("🔴 Record (F9)")
+                self.toolbar.btn_record.setStyleSheet(
+                    "QPushButton { background: #1c1917; color: #f87171; border: 1px solid #7f1d1d; border-radius: 6px; padding: 2px 13px 3px 13px; font-weight: 600; font-size: 11px; text-align: center; } QPushButton:hover { background: #7f1d1d; color: #ffffff; border-color: #ef4444; }"
+                )
+            self.recorder_overlay.hide_overlay()
+
+            # Restore xGen window and bring to front
+            self.showNormal()
+            self.activateWindow()
+            self.raise_()
+
+            self._last_recording_meta = meta
+            if hasattr(self.toolbar, "set_has_last_recording"):
+                self.toolbar.set_has_last_recording(True)
+
+            self.status_bar.lbl_msg.setText(f"Recording '{meta.name}' finalized ({meta.step_count} steps)")
+
+            # Present completion dialog with direct Open Folder & Export options
+            from xgen.ui.recorder.completion_dialog import RecordingCompletionDialog
+            dialog = RecordingCompletionDialog(meta, self.recorder_service.store.root_dir, self.recorder_service, self)
+            dialog.exec()
+            if getattr(dialog, "view_timeline_requested", False):
+                self._open_recorder_timeline()
+        except Exception as e:
+            logger.debug("Recorder stop error: %s", e)
+
+    def _show_last_recording(self) -> None:
+        """Display the RecordingCompletionDialog for the most recent recording session."""
+        meta = getattr(self, "_last_recording_meta", None) or self.recorder_service.get_last_recording_meta()
+        if not meta:
+            QMessageBox.information(
+                self,
+                "Show Last Recording",
+                "No recording session exists yet.\nClick 'Record (F9)' to start recording desktop interactions."
+            )
+            return
+
+        from xgen.ui.recorder.completion_dialog import RecordingCompletionDialog
+        dialog = RecordingCompletionDialog(meta, self.recorder_service.store.root_dir, self.recorder_service, self)
+        dialog.exec()
+        if getattr(dialog, "view_timeline_requested", False):
+            self._open_recorder_timeline()
+
+    def _on_toggle_recorder_panel(self) -> None:
+        self._show_last_recording()
+
+    def _open_recorder_timeline(self) -> None:
+        from xgen.ui.recorder.timeline_dialog import RecorderTimelineDialog
+        if self._timeline_dialog is None:
+            self._timeline_dialog = RecorderTimelineDialog(self.recorder_service, self.recorder_bridge, self)
+        self._timeline_dialog.panel.refresh_timeline()
+        self._timeline_dialog.show()
+        self._timeline_dialog.raise_()
+        self._timeline_dialog.activateWindow()
+
+    def _on_f9_record_shortcut(self) -> None:
+        st = self.recorder_service.status().state.value
+        if st in ("idle", "error"):
+            self._on_recorder_start()
+        elif st in ("recording", "paused"):
+            self._on_recorder_stop()
+
+    def _on_f10_pause_shortcut(self) -> None:
+        st = self.recorder_service.status().state.value
+        if st == "recording":
+            self._on_recorder_pause()
+        elif st == "paused":
+            self._on_recorder_resume()
+
+    def _on_recorder_state_changed(self, new_state: str) -> None:
+        dur = self.recorder_service.status().duration_seconds
+        steps = self.recorder_service.status().step_count
+        self.toolbar.recorder_controls.set_state(new_state, dur, steps)
+
+    def _on_recorder_step_added(self, step: Any) -> None:
+        cnt = self.recorder_service.status().step_count
+        self.toolbar.recorder_controls.update_step_count(cnt)
+        self.recorder_overlay.set_step_count(cnt)
+
+    def _on_recorder_warning(self, code: str, msg: str) -> None:
+        self.status_bar.lbl_msg.setText(f"Recorder Warning [{code}]: {msg}")
+        logger.warning("Recorder warning [%s]: %s", code, msg)
+
+    def _on_recorder_error(self, code: str, msg: str) -> None:
+        self.status_bar.lbl_msg.setText(f"Recorder Error [{code}]: {msg}")
+        logger.error("Recorder error [%s]: %s", code, msg)
+        if "permission" in code.lower() or "hook" in code.lower() or "access" in msg.lower():
+            QMessageBox.warning(
+                self, "Recorder Permission Warning",
+                f"Recorder encountered an OS permission or hook issue:\n\n{msg}\n\n"
+                "If the target window is running with Administrator elevation, please run xGen as Administrator."
+            )
 
     def _revert_window_picker(self, prev_handle: str) -> None:
         """Revert toolbar window picker selection back to prev_handle without triggering signals."""
@@ -1554,6 +1753,8 @@ class MainWindow(QMainWindow):
         self.overlay.close()
         self.tree_fetcher.close()
         self.session_manager.close()
+        if hasattr(self, "recorder_overlay"):
+            self.recorder_overlay.close()
 
         # Save layout and geometry state
         if not self.isMaximized():

@@ -64,15 +64,6 @@ def parsed_data():
     return root, lxml_tree
 
 @pytest.fixture
-def test_dir():
-    """Isolated temporary directory inside workspace for test executions."""
-    import os
-    import time
-    from pathlib import Path
-    import shutil
-
-    scratch_base = Path(__file__).resolve().parent.parent / ".pytest_scratch"
-    d = scratch_base / f"t_{os.getpid()}_{int(time.time() * 1000)}"
-    d.mkdir(parents=True, exist_ok=True)
-    yield d
-    shutil.rmtree(d, ignore_errors=True)
+def test_dir(tmp_path):
+    """Isolated temporary directory for test executions."""
+    return tmp_path

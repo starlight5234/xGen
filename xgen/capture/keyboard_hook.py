@@ -24,6 +24,8 @@ class GlobalKeyHook(QObject):
     f4_pressed = pyqtSignal()
     esc_pressed = pyqtSignal()
     ctrl_r_pressed = pyqtSignal()
+    f9_pressed = pyqtSignal()
+    f10_pressed = pyqtSignal()
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -33,6 +35,8 @@ class GlobalKeyHook(QObject):
         self._last_f4_time = 0.0
         self._last_esc_time = 0.0
         self._last_ctrl_r_time = 0.0
+        self._last_f9_time = 0.0
+        self._last_f10_time = 0.0
         self._modifier_active = False
 
     def start(self) -> None:
@@ -128,5 +132,15 @@ class GlobalKeyHook(QObject):
                     self._last_ctrl_r_time = now
                     logger.debug("Global Refresh (Ctrl+R) detected.")
                     self.ctrl_r_pressed.emit()
+            elif key == keyboard.Key.f9:
+                if now - self._last_f9_time >= 0.35:
+                    self._last_f9_time = now
+                    logger.debug("Global F9 (Record) detected.")
+                    self.f9_pressed.emit()
+            elif key == keyboard.Key.f10:
+                if now - self._last_f10_time >= 0.35:
+                    self._last_f10_time = now
+                    logger.debug("Global F10 (Pause) detected.")
+                    self.f10_pressed.emit()
         except Exception as e:
             logger.debug("Keyboard hook callback error: %s", e)

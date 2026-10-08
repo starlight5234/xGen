@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from xgen.core.session_manager import SessionState, WindowInfo
+from xgen.ui.recorder.controls import RecorderControls
 
 
 class StatusDot(QPushButton):
@@ -94,6 +95,9 @@ class Toolbar(QToolBar):
     pin_toggled = pyqtSignal(bool)             # always on top
     legend_requested = pyqtSignal()            # open XPath legend guide dialog
     custom_xpath_test = pyqtSignal(str)        # user-entered XPath string
+    record_requested = pyqtSignal()            # start recording session
+    show_last_recording_requested = pyqtSignal() # view last recording completion / summary
+    recorder_timeline_requested = show_last_recording_requested # backwards compatibility alias
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__("Main Toolbar", parent)
@@ -101,6 +105,7 @@ class Toolbar(QToolBar):
         self.setFloatable(False)
         self._current_state = SessionState.DISCONNECTED.value
         self._current_app_name = ""
+        self._has_last_recording = False
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -218,10 +223,32 @@ class Toolbar(QToolBar):
         self.btn_pin.toggled.connect(self._on_pin_toggled)
         center_layout.addWidget(self.btn_pin)
 
+        # 2e. Single Clean Record Button
+        self.btn_record = QPushButton("🔴 Record (F9)")
+        self.btn_record.setFixedHeight(26)
+        self.btn_record.setToolTip("Start desktop interaction recording (F9).\nxGen automatically minimizes into a floating overlay pill.")
+        self.btn_record.setStyleSheet(
+            "QPushButton { background: #1c1917; color: #f87171; border: 1px solid #7f1d1d; border-radius: 6px; padding: 2px 13px 3px 13px; font-weight: 600; font-size: 11px; text-align: center; }"
+            "QPushButton:hover { background: #7f1d1d; color: #ffffff; border-color: #ef4444; }"
+        )
+        self.btn_record.clicked.connect(self.record_requested.emit)
+        center_layout.addWidget(self.btn_record)
+
+        # Show Last Recording helper (hidden from toolbar bar; accessible via three-dots overflow menu)
+        self.btn_last_recording = QPushButton("🎬 Show Last Recording", self)
+        self.btn_last_recording.hide()
+        self.btn_last_recording.setEnabled(False)
+        self.btn_last_recording.setToolTip("No recording session exists yet")
+        self.btn_last_recording.clicked.connect(self.show_last_recording_requested.emit)
+
         layout.addWidget(self.center_container)
 
-        # Space after center buttons to preserve center alignment
+        # Space after center buttons
         layout.addStretch(1)
+
+        # Retain recorder_controls attribute for backwards compatibility (hidden)
+        self.recorder_controls = RecorderControls(self)
+        self.recorder_controls.hide()
 
         # === 3. Right Section: Test XPath Button & Overflow Menu ===
         self.btn_test_xpath = QPushButton("🧪 Test XPath")
@@ -501,6 +528,13 @@ class Toolbar(QToolBar):
             "}"
         )
 
+        act_last_recording = menu.addAction("🎬 Show Last Recording...")
+        act_last_recording.setToolTip("Open last recording summary, export options, and files")
+        act_last_recording.setEnabled(self._has_last_recording)
+        act_last_recording.triggered.connect(self.show_last_recording_requested.emit)
+
+        menu.addSeparator()
+
         act_export = menu.addAction("📤 Export XML")
         act_export.setToolTip("Export current raw XML page source to ./output/ directory")
         act_export.triggered.connect(self.export_xml_requested.emit)
@@ -516,3 +550,14 @@ class Toolbar(QToolBar):
         pos.setX(pos.x() - menu.sizeHint().width())
         pos.setY(pos.y() + 2)
         menu.exec(pos)
+
+    def set_has_last_recording(self, has_recording: bool) -> None:
+        """Enable or grey out the 'Show Last Recording' button and overflow menu option."""
+        self._has_last_recording = bool(has_recording)
+        self.btn_last_recording.blockSignals(True)
+        self.btn_last_recording.setEnabled(self._has_last_recording)
+        if self._has_last_recording:
+            self.btn_last_recording.setToolTip("Open the last recording session, export options, and files")
+        else:
+            self.btn_last_recording.setToolTip("No recording session exists yet")
+        self.btn_last_recording.blockSignals(False)

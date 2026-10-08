@@ -7,14 +7,51 @@ from __future__ import annotations
 
 import datetime
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from lxml import etree
-from PyQt6.QtCore import QReadWriteLock
 
 from xgen.core.tree_parser import TreeParser, UINode
 
 logger = logging.getLogger("xgen.cache")
+
+
+class RWLock:
+    """
+    Standard-library reader-writer lock.
+    Allows concurrent read locks and exclusive write locks.
+    Compatible drop-in replacement for QReadWriteLock.
+    """
+    def __init__(self):
+        self._cond = threading.Condition(threading.Lock())
+        self._readers = 0
+        self._writer = False
+        self._waiting_writers = 0
+
+    def lockForRead(self) -> None:
+        with self._cond:
+            while self._writer or self._waiting_writers > 0:
+                self._cond.wait()
+            self._readers += 1
+
+    def lockForWrite(self) -> None:
+        with self._cond:
+            self._waiting_writers += 1
+            while self._writer or self._readers > 0:
+                self._cond.wait()
+            self._waiting_writers -= 1
+            self._writer = True
+
+    def unlock(self) -> None:
+        with self._cond:
+            if self._writer:
+                self._writer = False
+                self._cond.notify_all()
+            elif self._readers > 0:
+                self._readers -= 1
+                if self._readers == 0:
+                    self._cond.notify_all()
 
 
 @dataclass
@@ -37,12 +74,12 @@ class WindowTreeCache:
 class TreeCacheStore:
     """
     Thread-safe storage of per-window UI trees.
-    Protected by QReadWriteLock for safe multi-threaded reads during XPath verification.
+    Protected by reader-writer lock for safe multi-threaded reads during XPath verification.
     """
     _instance: Optional[TreeCacheStore] = None
 
     def __init__(self):
-        self._lock = QReadWriteLock()
+        self._lock = RWLock()
         self._caches: Dict[str, WindowTreeCache] = {}
         self._active_handle: str = ""
 

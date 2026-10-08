@@ -639,4 +639,36 @@ def test_refresh_window_picker_runs_off_ui_thread(qapp, monkeypatch):
         win.close()
 
 
+def test_toolbar_show_last_recording_button_states(qapp):
+    """Test Show Last Recording button states, signals, and greyed-out behavior."""
+    toolbar = Toolbar()
+    assert "Show Last Recording" in toolbar.btn_last_recording.text()
+    # Must NOT be added to visible toolbar bar
+    assert toolbar.btn_last_recording.isVisible() is False
+    # Initially greyed out because no recording exists yet
+    assert toolbar.btn_last_recording.isEnabled() is False
+    assert toolbar._has_last_recording is False
+    assert "No recording session exists yet" in toolbar.btn_last_recording.toolTip()
 
+    # Emitted signals tracking
+    emitted = []
+    emitted_legacy = []
+    toolbar.show_last_recording_requested.connect(lambda: emitted.append(True))
+    toolbar.recorder_timeline_requested.connect(lambda: emitted_legacy.append(True))
+
+    # Enable button when recording exists
+    toolbar.set_has_last_recording(True)
+    assert toolbar.btn_last_recording.isEnabled() is True
+    assert toolbar._has_last_recording is True
+    assert "Open the last recording session" in toolbar.btn_last_recording.toolTip()
+
+    # Clicking emits both current and backwards-compatibility signals
+    toolbar.btn_last_recording.click()
+    assert len(emitted) == 1
+    assert len(emitted_legacy) == 1
+
+    # Disable button when no recording exists
+    toolbar.set_has_last_recording(False)
+    assert toolbar.btn_last_recording.isEnabled() is False
+    assert toolbar._has_last_recording is False
+    assert "No recording session exists yet" in toolbar.btn_last_recording.toolTip()
